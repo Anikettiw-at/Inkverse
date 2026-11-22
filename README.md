@@ -1,0 +1,205 @@
+# InkVerse
+
+Comics + web-novel platform with **Reader** and **Creator** accounts, live **moderated chat channels**, early-access **coin payments**, creator **payouts**, analytics, and an admin moderation console.
+
+Full-stack: Node.js · Express · SQLite (better-sqlite3) · WebSocket (`ws`) · vanilla-JS SPA (PWA). No build step.
+
+> **Status:** fully working locally with a sandbox checkout. Add Razorpay (UPI/cards in INR) or Stripe keys to take real payments — see §5.
+
+Docs: [`design.md`](design.md) (features, business rules, architecture) · [`tasks.md`](tasks.md) (what is done / next).
+
+---
+
+## 1. Quick start (local)
+
+Requirements: **Node.js 18+** (tested on 22) and npm.
+
+```bash
+npm install
+npm start            # http://localhost:3000
+```
+
+The first start creates `data/inkverse.db` and seeds demo content.
+
+| Account | Login | Password | Role |
+|---|---|---|---|
+| Admin / moderator | `admin` | `Admin123!` | admin |
+| Creator | `NovaInk` | `Creator123!` | creator (has earnings) |
+| Creator | `KaiWrites` | `Creator123!` | creator |
+| Reader | `ReaderRay` | `Reader123!` | reader (500 coins) |
+
+> These demo credentials are public. **Never deploy with them** — see §3.
+
+```bash
+npm test             # 85 end-to-end API checks on a throwaway database
+```
+
+---
+
+## 2. Environment variables
+
+All optional locally. Copy `.env.example` to `.env` and run `npm run start:env` (uses Node's built-in `--env-file`), or set them in your host's dashboard.
+
+| Variable | Default | Required in production? | Purpose |
+|---|---|---|---|
+| `PORT` | `3000` | host usually sets it | HTTP + WebSocket port |
+| `JWT_SECRET` | auto-generated into `data/.secret` | **Yes** | Signs login tokens. Use 48+ random chars (`openssl rand -hex 48`). If it changes, everyone is logged out. |
+| `DATA_DIR` | `./data` | **Yes** (point to a persistent disk) | Holds the SQLite DB and the auto secret |
+| `DB_FILE` | `<DATA_DIR>/inkverse.db` | no | Override the database file path |
+| `UPLOAD_DIR` | `./uploads` | **Yes** (persistent disk) | Uploaded covers and comic pages |
+| `SEED_DEMO` | `true` | **Set to `false`** | `false` = no demo users/content |
+| `ADMIN_EMAIL` | – | **Yes** (with `SEED_DEMO=false`) | Email of the real admin account created on boot |
+| `ADMIN_PASSWORD` | – | **Yes** (with `SEED_DEMO=false`) | Its password (8+ chars; change it after first login) |
+| `ADMIN_USERNAME` | `admin` | no | Its username |
+| `HOLD_DAYS` | `14` | no | Days creator earnings are held before they can be withdrawn |
+| `PUBLIC_URL` | request host | **Yes** | Your public https URL (used in Stripe redirects and reset emails) |
+| `STRIPE_SECRET_KEY` | – | **Yes** for real sales | `sk_test_…` / `sk_live_…`. Enables card checkout and disables the demo checkout. |
+| `STRIPE_WEBHOOK_SECRET` | – | **Yes** with Stripe | `whsec_…` from your webhook endpoint (`/api/stripe/webhook`); coins are credited only by this signed event |
+| `DEMO_PAYMENTS` | `true` when no Stripe key | set `false` | `false` removes the free demo checkout |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_SECURE` | – | **Yes** for password reset | Any SMTP provider (Brevo, Resend, Mailgun, SendGrid, Gmail app password) |
+| `MAIL_FROM` | `SMTP_USER` | recommended | e.g. `InkVerse <no-reply@yourdomain.com>` |
+| `BACKUP_KEEP` | `7` | no | Daily DB backups kept in `DATA_DIR/backups` |
+
+Business rules (revenue split, payout minimum, coin packs, check-in rewards) live in `server/db.js → RULES` and are also shown in the UI automatically.
+
+### Minimal production `.env`
+```env
+PORT=3000
+JWT_SECRET=<output of: openssl rand -hex 48>
+DATA_DIR=/var/data
+UPLOAD_DIR=/var/data/uploads
+SEED_DEMO=false
+ADMIN_EMAIL=you@yourdomain.com
+ADMIN_PASSWORD=<a long unique password>
+```
+
+---
+
+## 3. Deployment
+
+### Important constraints (read first)
+1. **SQLite + uploads live on disk → you need a persistent disk/volume.** Hosts with ephemeral filesystems (free tiers, most serverless platforms) will lose all data on restart.
+2. **Run a single instance.** Chat rooms are held in memory and SQLite is single-writer. To scale horizontally, move to Postgres + Redis pub/sub (see `tasks.md`).
+3. **Serve over HTTPS.** The client automatically uses `wss://` when the page is HTTPS. Your proxy must forward WebSocket upgrades on `/ws`.
+4. **Not suitable for Vercel/Netlify functions** (long-lived WebSocket + disk).
+
+### Option A — Docker (any VPS, Fly.io, Railway, Render, Coolify…)
+```bash
+docker build -t inkverse .
+docker run -d --name inkverse -p 3000:3000 \
+  -v inkverse_data:/var/data \
+  -e JWT_SECRET=$(openssl rand -hex 48) \
+  -e DATA_DIR=/var/data -e UPLOAD_DIR=/var/data/uploads \
+  -e SEED_DEMO=false -e ADMIN_EMAIL=you@yourdomain.com -e ADMIN_PASSWORD='change-me-please' \
+  inkverse
+```
+
+### Option B0 — One-click Render Blueprint (recommended)
+This repo contains `render.yaml` at its root. In Render: **New → Blueprint** → select the repo → enter `ADMIN_EMAIL` and `ADMIN_PASSWORD` when prompted → **Apply**. It creates a Starter web service with a 1 GB persistent disk (paid; disks are not available on the free tier), generates `JWT_SECRET`, and disables demo accounts. Open the service URL and log in with the admin you entered.
+
+### Option B — Render / Railway (manual)
+1. Push this repo to GitHub, create a **Web Service** from it.
+2. Build command: `npm install` · Start command: `npm start`.
+3. Add a **persistent disk** mounted at `/var/data` (Render: Disks · Railway: Volumes).
+4. Add the environment variables from the table above (`DATA_DIR=/var/data`, `UPLOAD_DIR=/var/data/uploads`, …).
+5. Deploy, open the URL, log in with `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
+
+### Option C — VPS with pm2 + Nginx
+```bash
+sudo apt install -y nodejs npm nginx certbot python3-certbot-nginx   # Node 18+
+git clone <your repo> /opt/inkverse && cd /opt/inkverse && npm ci --omit=dev
+sudo mkdir -p /var/data && sudo chown $USER /var/data
+cp .env.example .env && nano .env          # fill the production values
+npm i -g pm2 && pm2 start "node --env-file=.env server/index.js" --name inkverse && pm2 save && pm2 startup
+```
+Nginx site (`/etc/nginx/sites-available/inkverse`), then `sudo certbot --nginx -d yourdomain.com`:
+```nginx
+server {
+  server_name yourdomain.com;
+  client_max_body_size 80m;                 # comic chapter uploads
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade; # WebSocket chat
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+```
+
+### Backups
+Back up `DATA_DIR` (database + secret) and `UPLOAD_DIR` nightly. For a consistent DB copy while running: `sqlite3 inkverse.db ".backup backup.db"`.
+
+---
+
+## 4. Pre-launch checklist
+- [ ] `SEED_DEMO=false`, real `ADMIN_*` set, demo accounts absent
+- [ ] Strong `JWT_SECRET`, HTTPS on, WebSocket proxy works (open a chat channel)
+- [ ] Persistent disk mounted and backed up
+- [ ] Real payments connected (below) — the demo checkout is for development only
+- [ ] Terms, Privacy Policy and a registered DMCA agent reviewed by a lawyer
+- [ ] Replace the demo word filter list with a maintained, multilingual one
+- [ ] Add image moderation before opening uploads to the public
+- [ ] Add transactional email (password reset, removal notices)
+
+## 5. Payment gateway
+
+All purchases go through one order pipeline (`server/gateway.js`): the server creates the order and sets the price, the provider takes the money, and coins are credited **only** after a signed confirmation. That confirmation is credited **exactly once**: handler and webhook can both arrive and no coins are double-credited, and a tampered amount is rejected.
+
+| Gateway | Methods | Currency | Enable with |
+|---|---|---|---|
+| **Razorpay** | UPI, cards, netbanking, wallets | INR | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` |
+| **Stripe** | International cards | USD | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
+| **Sandbox** | Simulated UPI / card / netbanking (success or decline) | INR | on automatically when no real gateway is set; `DEMO_PAYMENTS=false` turns it off |
+
+**Razorpay setup:** in the dashboard create API keys (test mode first). Add a webhook at `https://yourdomain.com/api/razorpay/webhook` with the events `payment.captured`, `payment.failed` and `order.paid`, then copy its secret into `RAZORPAY_WEBHOOK_SECRET`. Test with Razorpay's test UPI ID `success@razorpay`.
+**Stripe setup:** add a webhook at `/api/stripe/webhook` for `checkout.session.completed`.
+
+What else the payment system includes:
+- **Coupons:** the admin creates them (Admin → Coupons). Each gives bonus coins, can have a use limit and an expiry date, and each reader can use a code once.
+- **Receipts:** `#/receipt/<order>` is printable and can be saved as a PDF. Fill `BUSINESS_NAME`, `BUSINESS_ADDRESS` and `BUSINESS_GSTIN` for invoices.
+- **Refunds:** Admin → Orders → Refund calls the provider's refund API and then takes the coins back out of the buyer's wallet.
+- **Revenue report:** shows revenue per currency and per gateway, plus checkout conversion over the last 30 days.
+- **Abandoned checkouts** expire after 2 hours. A late webhook can still credit them.
+- **Payouts to creators** are still manual (approve after you pay). Next step: RazorpayX Payouts or Stripe Connect.
+
+## 6. How it works (short)
+- **Readers** register, read, comment, react, follow, host chat channels, buy coins (UPI/cards), use coupons, gift coins, invite friends (both get 100 coins after the friend's first purchase), tip.
+- **Creators** also create series and upload chapters (single, bulk, or scheduled weekly), set early-access prices, see analytics and request payouts.
+- **Money:** coins unlock early-access chapters → creator earns **70 %** of net coin value (tips **90 %**) → earnings are held 14 days → creator requests a payout (≥ $50) → admin approves.
+- **Moderation:** automatic filter + rate limits → strikes (mute → ban) → report queue (auto-hide at 3 reports) → appeals → audit log; DMCA workflow for copyright.
+
+## 7. Project structure
+```
+server/
+  index.js        Express app, REST API, WebSocket chat, scheduler
+  gateway.js      payment gateway: orders, Razorpay/Stripe/sandbox, coupons, refunds, revenue
+  extras.js       coin gifts, referrals, creator earnings CSV
+  advanced.js     recommendations, analytics, reactions, streaks, badges, appeals, audit, word filter
+  moderation.js   text screening, strikes, reports
+  db.js           schema + business RULES
+  seed.js         demo / production seeding
+  smoke-test.js   end-to-end tests (npm test)
+public/           SPA (index.html, css/styles.css, js/app.js), PWA manifest + service worker
+uploads/          user uploads (git-ignored)
+data/             SQLite DB + secret (git-ignored)
+design.md  tasks.md  README.md  Dockerfile  .env.example
+```
+
+## 8. API overview
+Auth `POST /api/auth/register|login` · `GET/PATCH /api/me` · Catalogue `GET /api/series`, `/api/series/:id`, `/api/chapters/:id` · Creator `POST /api/series`, `/api/series/:id/chapters`, `/chapters/bulk`, `GET /api/creator/dashboard|analytics`, `POST /api/creator/payout` · Money `GET /api/wallet`, `POST /api/wallet/buy`, `/api/chapters/:id/unlock`, `/api/tip` · Community `GET/POST /api/channels`, WebSocket `/ws`, `POST /api/report`, `/api/appeals` · Admin `GET/POST /api/admin/*` · Engagement `POST /api/checkin`, `GET /api/recommendations`, `/api/me/badges`.
+
+## 9. Troubleshooting
+| Problem | Fix |
+|---|---|
+| `npm install` fails building `better-sqlite3` | Install build tools (Windows: Visual Studio Build Tools; Linux: `build-essential python3`) or use a Node LTS version with prebuilt binaries. |
+| Node crashes instantly (exit code 139 / `-1073741819`) | Use the pinned `better-sqlite3@11.10.0` from `package.json` (newer releases crashed on Node 22.12/Windows during testing). |
+| Chat shows "offline" behind a proxy | Forward `Upgrade`/`Connection` headers for `/ws` (Nginx snippet above). |
+| Logged out after every deploy | Set a fixed `JWT_SECRET` and persistent `DATA_DIR`. |
+| Uploaded images vanish after deploy | `UPLOAD_DIR` is not on a persistent disk. |
+| Project inside OneDrive behaves oddly | Keep `data/` outside synced folders (`DATA_DIR=C:\inkverse-data`). |
+
+## License
+MIT — demo project; review legal/payment requirements before operating a real marketplace.
