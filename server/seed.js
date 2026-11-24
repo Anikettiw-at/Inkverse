@@ -24,7 +24,8 @@ function run() {
     if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) ensureUser(process.env.ADMIN_USERNAME || 'admin', process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD, 'admin');
     return;
   }
-  const admin = ensureUser('admin', 'admin@inkverse.test', 'Admin123!', 'admin');
+  // On a public demo site set ADMIN_PASSWORD, otherwise anyone could log in with the published demo password.
+  const admin = ensureUser(process.env.ADMIN_USERNAME || 'admin', process.env.ADMIN_EMAIL || 'admin@inkverse.test', process.env.ADMIN_PASSWORD || 'Admin123!', 'admin');
   const nova = ensureUser('NovaInk', 'nova@inkverse.test', 'Creator123!', 'creator', { coins: 300, payout: 'nova@inkverse.test', tax: 1 });
   const kai = ensureUser('KaiWrites', 'kai@inkverse.test', 'Creator123!', 'creator', { coins: 300, payout: 'kai@inkverse.test', tax: 1 });
   const reader = ensureUser('ReaderRay', 'reader@inkverse.test', 'Reader123!', 'reader', { coins: 500 });
