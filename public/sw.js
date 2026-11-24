@@ -1,5 +1,5 @@
 // Minimal PWA service worker: cache the app shell, network-first for API, cache-first for generated/uploaded images.
-const SHELL = 'iv-shell-v3', IMG = 'iv-img-v1';
+const SHELL = 'iv-shell-v4', IMG = 'iv-img-v1';
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => c.addAll(['/', '/css/styles.css', '/js/app.js', '/icon.svg'])).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => ![SHELL, IMG].includes(k)).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

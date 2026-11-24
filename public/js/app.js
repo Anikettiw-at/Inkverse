@@ -56,7 +56,8 @@ function renderNav() {
   $('#nav').innerHTML = `
     <button class="pill burger" id="burger" aria-label="Menu">☰</button>
     <a class="logo" href="#/"><b>INK</b>VERSE</a>
-    <nav class="nav-links" id="links">${link('', 'Home')}${link('browse', 'Browse')}${link('channels', 'Channels 💬')}${u ? link('library', 'Library') : ''}${u && u.role !== 'reader' ? link('studio', 'Studio ✏️') : ''}${u?.role === 'admin' ? link('admin', 'Admin 🛡️') : ''}</nav>
+    <nav class="nav-links" id="links">${link('', 'Home')}${link('browse', 'Browse')}${link('channels', 'Channels 💬')}${u ? link('library', 'Library') : ''}${u && u.role !== 'reader' ? link('studio', 'Studio ✏️') : ''}${u?.role === 'admin' ? link('admin', 'Admin 🛡️') : ''}${u ? `<a href="#/wallet" class="m-only ${cur === 'wallet' ? 'active' : ''}">Wallet 🪙</a>` : ''}
+      <form class="search m-only" id="msform" role="search"><input id="mq" type="search" placeholder="Search comics & novels" aria-label="Search"></form><button class="pill m-only" id="mtheme" type="button">🌓 Toggle theme</button></nav>
     <div class="nav-right">
       <form class="search" id="sform"><input id="q" type="search" placeholder="Search comics & novels" aria-label="Search"></form>
       <button class="pill" id="theme" title="Toggle theme" aria-label="Toggle theme">🌓</button>
@@ -66,8 +67,10 @@ function renderNav() {
     </div>`;
   $('#burger').onclick = () => $('#links').classList.toggle('open');
   $$('#links a').forEach(a => a.onclick = () => $('#links').classList.remove('open'));
-  $('#theme').onclick = () => { const d = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = d; try { localStorage.setItem('iv_theme', d); } catch {} };
+  const toggleTheme = () => { const d = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = d; try { localStorage.setItem('iv_theme', d); } catch {} };
+  $('#theme').onclick = toggleTheme; $('#mtheme').onclick = () => { toggleTheme(); $('#links').classList.remove('open'); };
   $('#sform').onsubmit = e => { e.preventDefault(); location.hash = '#/browse?q=' + encodeURIComponent($('#q').value); };
+  $('#msform').onsubmit = e => { e.preventDefault(); $('#links').classList.remove('open'); location.hash = '#/browse?q=' + encodeURIComponent($('#mq').value); };
   if (u) { $('#bell').onclick = showNotifs; $('#me').onclick = showMenu; } else $('#login').onclick = () => authModal();
   bindSuggest();
 }
